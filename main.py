@@ -1,4 +1,4 @@
-from random import randint
+from random import randint, choice
 
 import pygame
 from pygame.locals import *
@@ -23,19 +23,16 @@ class Player(pygame.sprite.Sprite):
         super().__init__()
         self.radius = 20
         self.image = pygame.Surface([self.radius * 2, self.radius * 2])
-        pygame.draw.circle(
-            self.image,
-            (255,
-             0,
-             0),
-            (self.radius,
-             self.radius),
-            self.radius)        # Draw player as circle
+        pygame.draw.circle(self.image, (255, 0, 0), (self.radius, self.radius),
+                           self.radius)        # Draw player as circle
         self.image.set_colorkey((0, 0, 0))
         self.rect = self.image.get_rect()
         self.attack_range = 150
-        self.new_game()
         self.attack_sprite = None
+        self.safe_margin = 50
+        self.color = (255, 0, 0)
+        self.charged_color = (0, 255, 0)
+        self.new_game()
 
     def draw(self, win):
         win.blit(self.image, self.rect.topleft)
@@ -55,12 +52,16 @@ class Player(pygame.sprite.Sprite):
             if self.charge >= 1:
                 self.attack(enemies)
                 self.charge = 0
+                pygame.draw.circle(
+                    self.image, self.color, (self.radius, self.radius), self.radius)
         # Fruits
         collected_fruits = pygame.sprite.spritecollide(
             self, fruits, dokill=False)  # Not using circle collision
         for fruit in collected_fruits:
             fruit.kill()
             self.charge += 1
+            pygame.draw.circle(self.image, self.charged_color,
+                               (self.radius, self.radius), self.radius)
         # Enemies
         hurt = pygame.sprite.spritecollideany(self, enemies)
         if hurt:
@@ -76,13 +77,28 @@ class Player(pygame.sprite.Sprite):
             dokill=False)        # Not using circle collision
         for enemy in damaged:
             enemy.health -= 1
-            self.score += 1
+        self.score += self.get_points(damaged)
+
+    def get_points(self, damaged):
+        """ Calculated the number of points for killed enemies,
+            including combos etc.
+        """
+        total_points = len(damaged)
+        if len(damaged) > 2:
+            total_points += 1
+        elif len(damaged) > 3:
+            total_points += 2
+        elif len(damaged) > 4:
+            total_points += 4
+        return total_points
 
     def new_game(self):
         """ Resets necessary attributes for every game """
         self.rect.center = (int(win_x / 2), int(win_y / 2))
         self.score = 0
         self.charge = 0
+        pygame.draw.circle(self.image, self.color,
+                           (self.radius, self.radius), self.radius)
 
 
 class Fruit(pygame.sprite.Sprite):
@@ -125,7 +141,7 @@ class Enemy(pygame.sprite.Sprite):
     enemy_spawn_rate = 60           # Frames between enemy spawn
     enemy_spawn_counter = 1         # Counter for next spawn
 
-    def __init__(self):
+    def __init__(self, player):
         super().__init__()
         self.radius = 10
         self.image = pygame.Surface((self.radius * 2, self.radius * 2))
@@ -133,9 +149,28 @@ class Enemy(pygame.sprite.Sprite):
                            (self.radius, self.radius), self.radius)
         self.image.set_colorkey((0, 0, 0))
         self.rect = self.image.get_rect()
-        self.rect.center = [randint(0, win_x), randint(0, win_y)]
+        self.rect.center = self.get_start_pos()
+        """self.rect.centerx = choice(
+            list(range(0, player.rect.x - player.safe_margin)) +
+            list(range(player.rect.x + player.safe_margin, win_x)))
+        self.rect.centery = choice(
+            list(range(0, player.rect.y - player.safe_margin)) +
+            list(range(player.rect.y + player.safe_margin, win_y)))
+        # self.rect.center = [randint(0, win_x), randint(0, win_y)]
+        """
         self.health = 1
         self.enemies.add(self)
+
+    def get_start_pos(self):
+        if choice([True, False]):
+            # True - spawn on vertical sides (just outside)
+            x_pos = choice([-self.radius, win_x + self.radius])
+            y_pos = randint(-self.radius, win_y + self.radius)
+        else:
+            # False - spawn on horizontal sides
+            x_pos = randint(-self.radius, win_x + self.radius)
+            y_pos = choice([-self.radius, win_y + self.radius])
+        return (x_pos, y_pos)
 
     def draw(self, win):
         win.blit(self.image, self.rect.topleft)
@@ -156,15 +191,30 @@ class Enemy(pygame.sprite.Sprite):
     def increase_spawn_rate(cls, player):
         if player.score // (cls.level * 10) > 0:
             cls.level += 1
-        if not 60 - cls.level * 5 <= 0:
-            cls.enemy_spawn_rate = 60 - cls.level * 5
+            cls.enemy_spawn_rate = int(cls.get_spawn_rate(cls.level))
+            print(cls.enemy_spawn_rate)
+        # if not 60 - cls.level * 5 <= 0:
+        #     cls.enemy_spawn_rate = 60 - cls.level * 5
+
+    @classmethod
+    def get_spawn_rate(cls, level):
+        """ How many frames between enemy spawns.
+
+            Start with per 60 frames, then reduce as a
+            negative parabola:
+                f(x) = -0.3x^2+60
+        """
+        def f1(x): return -0.3 * x**2 + 60
+        def f2(x): return 40 - x
+        spawn_rate = f1(level) if level < 10 else f2(level)
+        return spawn_rate
 
     @classmethod
     def spawn_controller(cls, player):
         cls.increase_spawn_rate(player)
         cls.enemy_spawn_counter += 1
         if cls.enemy_spawn_counter % cls.enemy_spawn_rate == 0:
-            cls.enemies.add(Enemy())
+            cls.enemies.add(Enemy(player=player))
 
     @classmethod
     def new_game(cls):
@@ -184,8 +234,8 @@ FPS = 60
 
 # UI
 font = pygame.font.SysFont("text", 50, bold=True)
-attackBar = pygame.Surface([win_x - 100, 30])
-attackBar.fill((80, 255, 80))
+# attackBar = pygame.Surface([win_x - 100, 30])
+# attackBar.fill((80, 255, 80))
 
 # Player
 player = Player()
@@ -220,23 +270,16 @@ def updateUI(win):
     score = font.render(score_text, False, (255, 255, 255))
     level_text = f"Level: {Enemy.level}"
     level = font.render(level_text, False, (255, 255, 255))
-    if player.charge >= 1:
+
+    """ if player.charge >= 1:
         attackBar.fill((0, 255, 80))
     else:
         attackBar.fill((80, 80, 80))
+    """
     return {
-        score: (
-            0,
-            0),
-        attackBar: (
-            50,
-            win_y -
-            40),
-        level: (
-            win_x -
-            level.get_width() -
-            10,
-            0)}
+        score: (0, 0),
+        # attackBar: (50, win_y - 40),
+        level: (win_x - level.get_width() - 10, 0)}
 
 
 # Window loop
